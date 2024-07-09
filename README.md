@@ -29,6 +29,18 @@ ConcurrentStore (20 procs, 100 workers, 100 keys) = 1450k qps
 ConcurrentStore (40 procs, 100 workers, 100 keys) = 1207k qps
 ConcurrentStore (100 procs, 100 workers, 100 keys) = 331k qps
 
+
+ConcurrentStore (10 procs, 100 clients, 1 key) = 967k qps
+ConcurrentStore (16 procs, 100 clients, 1 key) = 1200k qps
+ConcurrentStore (20 procs, 100 clients, 1 key) = 1163k qps
+ConcurrentStore (30 procs, 100 clients, 1 key) = 1000k qps
+
+ConcurrentStore (16 procs, 1000 clients, 1 key) = 800k qps
+ConcurrentStore (30 procs, 1000 clients, 1 key) = 850k qps
+ConcurrentStore (16 procs, 2000 clients, 1 key) = 600k qps
+
+ChannelStore (16 procs, 2000 clients, 1 key) = 550k qps
+
 ```
 
 Notes:

@@ -10,13 +10,19 @@ import (
 	"flag"
 	"os"
 	"time"
+	"runtime/pprof"
+	"runtime"
 
 	"golang.org/x/sync/errgroup"
-	"runtime/pprof"
+	"github.com/cespare/xxhash"
 )
 
 var(
 	cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+	threads = flag.Int("threads", 10, "number of system threads to use to use")
+	acceptWorkers = flag.Int("acceptworkers", 10, "number of goroutines to use to accept connections")
+	shards = flag.Int("shards", 1, "number of store shards to use")
+	backend = flag.String("backend", "channel", "backend to use (channel, concurrent, lock)")
 )
 
 type Store interface {
@@ -60,13 +66,33 @@ const (
 const validationMagicNumber = 0x3C85F7CE
 
 type TCPStore struct{
-	store *ChannelStore
+	stores []Store
+}
+
+func newStore(backend string) (Store, error) {
+	switch backend {
+	case "channel":
+		return NewChannelStore(), nil
+	case "concurrent":
+		return NewConcurrentStore(), nil
+	case "lock":
+		return NewLockStore(), nil
+	default:
+		return nil, fmt.Errorf("unknown backend %s", backend)
+	}
 }
 
 
 func run() error {
 	store := &TCPStore{}
-	store.store = NewChannelStore()
+
+	for i := 0; i < *shards; i++ {
+		s, err := newStore(*backend)
+		if err != nil {
+			return err
+		}
+		store.stores = append(store.stores, s)
+	}
 
 	return store.Listen(":19503")
 }
@@ -82,7 +108,7 @@ func (s *TCPStore) Listen(bind string) error {
 
 	var eg errgroup.Group
 
-	for i:=0;i<4;i++ {
+	for i:=0;i<*acceptWorkers;i++ {
 		eg.Go(func() error {
 			for {
 				// Wait for a connection.
@@ -97,6 +123,14 @@ func (s *TCPStore) Listen(bind string) error {
 	}
 
 	return eg.Wait()
+}
+
+func (s *TCPStore) getShardStore(key string) Store {
+	if len(s.stores) == 1 {
+		return s.stores[0]
+	}
+	id := xxhash.Sum64String(key)
+	return s.stores[id % uint64(len(s.stores))]
 }
 
 func readByte(r io.Reader) (byte, error) {
@@ -278,7 +312,7 @@ func (s *TCPStore) processCommand(c *bufio.ReadWriter) error {
 			return err
 		}
 
-        return s.store.Set(key, []byte(value))
+        return s.getShardStore(key).Set(key, []byte(value))
 
 	case WAIT:
 		keys, err := readStrings(c)
@@ -286,8 +320,16 @@ func (s *TCPStore) processCommand(c *bufio.ReadWriter) error {
 			return err
 		}
 
-		if err := s.store.Wait(keys); err != nil {
-			return err
+		if len(s.stores) == 0 {
+			if err := s.stores[0].Wait(keys); err != nil {
+				return err
+			}
+		} else {
+			for _, key := range keys {
+				if err := s.getShardStore(key).Wait([]string{key}); err != nil {
+					return err
+				}
+			}
 		}
 
 		return writeByte(c, byte(STOP_WAITING))
@@ -298,7 +340,7 @@ func (s *TCPStore) processCommand(c *bufio.ReadWriter) error {
 			return err
 		}
 
-		value, err := s.store.Get(key)
+		value, err := s.getShardStore(key).Get(key)
 		if err != nil {
 			return err
 		}
@@ -319,7 +361,7 @@ func (s *TCPStore) processCommand(c *bufio.ReadWriter) error {
 			return err
 		}
 
-		v, err := s.store.Add(key, incr)
+		v, err := s.getShardStore(key).Add(key, incr)
 		if err != nil {
 			return err
 		}
@@ -338,6 +380,7 @@ func (s *TCPStore) processCommand(c *bufio.ReadWriter) error {
 func main() {
 	log.SetFlags(log.Flags() | log.Lshortfile)
 	flag.Parse()
+	runtime.GOMAXPROCS(*threads)
 
 	log.Printf("cpu profile %q %v", *cpuprofile)
 
