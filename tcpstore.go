@@ -7,8 +7,16 @@ import (
 	"encoding/binary"
 	"fmt"
 	"bufio"
+	"flag"
+	"os"
+	"time"
 
 	"golang.org/x/sync/errgroup"
+	"runtime/pprof"
+)
+
+var(
+	cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 )
 
 type Store interface {
@@ -52,13 +60,13 @@ const (
 const validationMagicNumber = 0x3C85F7CE
 
 type TCPStore struct{
-	store *ConcurrentStore
+	store *ChannelStore
 }
 
 
 func run() error {
 	store := &TCPStore{}
-	store.store = NewConcurrentStore()
+	store.store = NewChannelStore()
 
 	return store.Listen(":19503")
 }
@@ -329,6 +337,27 @@ func (s *TCPStore) processCommand(c *bufio.ReadWriter) error {
 
 func main() {
 	log.SetFlags(log.Flags() | log.Lshortfile)
+	flag.Parse()
+
+	log.Printf("cpu profile %q %v", *cpuprofile)
+
+    if *cpuprofile != "" {
+		log.Printf("cpuprofile")
+        f, err := os.Create(*cpuprofile)
+        if err != nil {
+            log.Fatal(err)
+        }
+        pprof.StartCPUProfile(f)
+        defer pprof.StopCPUProfile()
+
+		go func() {
+			log.Printf("stopping in 30 seconds")
+			<-time.NewTimer(time.Second * 30).C
+			log.Printf("Stopping CPU profile")
+            pprof.StopCPUProfile()
+		}()
+    }
+
 
 	if err := run(); err != nil {
 		log.Fatal(err)
