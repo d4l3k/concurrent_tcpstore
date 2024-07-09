@@ -52,13 +52,13 @@ const (
 const validationMagicNumber = 0x3C85F7CE
 
 type TCPStore struct{
-	store *ChannelStore
+	store *ConcurrentStore
 }
 
 
 func run() error {
 	store := &TCPStore{}
-	store.store = NewChannelStore()
+	store.store = NewConcurrentStore()
 
 	return store.Listen(":19503")
 }

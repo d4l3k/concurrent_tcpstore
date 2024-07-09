@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"encoding/binary"
+	"runtime"
 )
 
 type response struct{
@@ -43,6 +44,12 @@ func NewChannelStore() *ChannelStore {
 }
 
 func (s *ChannelStore) worker() {
+	// lock the thread for maximum performance
+	if false {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	}
+
 	kv := s.kv
 	for req := range s.reqs {
 		switch req.Query {
