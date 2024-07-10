@@ -7,22 +7,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"bufio"
-	"flag"
-	"os"
-	"time"
-	"runtime/pprof"
-	"runtime"
 
 	"golang.org/x/sync/errgroup"
 	"github.com/cespare/xxhash"
-)
-
-var(
-	cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
-	threads = flag.Int("threads", 10, "number of system threads to use to use")
-	acceptWorkers = flag.Int("acceptworkers", 10, "number of goroutines to use to accept connections")
-	shards = flag.Int("shards", 1, "number of store shards to use")
-	backend = flag.String("backend", "channel", "backend to use (channel, concurrent, lock)")
 )
 
 type Store interface {
@@ -65,7 +52,7 @@ const (
 
 const validationMagicNumber = 0x3C85F7CE
 
-type TCPStore struct{
+type TCPStoreServer struct{
 	stores []Store
 }
 
@@ -82,22 +69,7 @@ func newStore(backend string) (Store, error) {
 	}
 }
 
-
-func run() error {
-	store := &TCPStore{}
-
-	for i := 0; i < *shards; i++ {
-		s, err := newStore(*backend)
-		if err != nil {
-			return err
-		}
-		store.stores = append(store.stores, s)
-	}
-
-	return store.Listen(":19503")
-}
-
-func (s *TCPStore) Listen(bind string) error {
+func (s *TCPStoreServer) Listen(bind string) error {
 	l, err := net.Listen("tcp", bind)
 	if err != nil {
 		return err
@@ -125,7 +97,7 @@ func (s *TCPStore) Listen(bind string) error {
 	return eg.Wait()
 }
 
-func (s *TCPStore) getShardStore(key string) Store {
+func (s *TCPStoreServer) getShardStore(key string) Store {
 	if len(s.stores) == 1 {
 		return s.stores[0]
 	}
@@ -250,7 +222,19 @@ func readStrings(r io.Reader) ([]string, error) {
 	return keys, nil
 }
 
-func (s *TCPStore) workerHandler(c *net.TCPConn) {
+func writeStrings(w io.Writer, keys []string) error {
+	if err := writeUint64(w, uint64(len(keys))); err != nil {
+		return err
+	}
+	for _, key := range keys {
+		if err := writeString(w, key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *TCPStoreServer) workerHandler(c *net.TCPConn) {
 	defer c.Close()
 
 	c.SetNoDelay(true)
@@ -275,7 +259,7 @@ func (s *TCPStore) workerHandler(c *net.TCPConn) {
 	}
 }
 
-func (s *TCPStore) processCommand(c *bufio.ReadWriter) error {
+func (s *TCPStoreServer) processCommand(c *bufio.ReadWriter) error {
 	cmd, err := readByte(c)
 	if err != nil {
 		return err
@@ -374,35 +358,5 @@ func (s *TCPStore) processCommand(c *bufio.ReadWriter) error {
 
 	default:
 		return fmt.Errorf("unknown command %d", cmd)
-	}
-}
-
-func main() {
-	log.SetFlags(log.Flags() | log.Lshortfile)
-	flag.Parse()
-	runtime.GOMAXPROCS(*threads)
-
-	log.Printf("cpu profile %q %v", *cpuprofile)
-
-    if *cpuprofile != "" {
-		log.Printf("cpuprofile")
-        f, err := os.Create(*cpuprofile)
-        if err != nil {
-            log.Fatal(err)
-        }
-        pprof.StartCPUProfile(f)
-        defer pprof.StopCPUProfile()
-
-		go func() {
-			log.Printf("stopping in 30 seconds")
-			<-time.NewTimer(time.Second * 30).C
-			log.Printf("Stopping CPU profile")
-            pprof.StopCPUProfile()
-		}()
-    }
-
-
-	if err := run(); err != nil {
-		log.Fatal(err)
 	}
 }
