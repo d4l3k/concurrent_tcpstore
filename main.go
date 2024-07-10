@@ -55,7 +55,7 @@ func barrier(store *TCPStoreClient, key string, worldSize int) error {
 func benchmarkBarrier(rank int) error {
 	pid := os.Getpid()
 
-	for i := 0; i < 1; i ++ {
+	for i := 0; i < 2; i ++ {
 		start := time.Now()
 
 		store, err := Dial(*connect)
@@ -64,7 +64,7 @@ func benchmarkBarrier(rank int) error {
 		}
 		defer store.Close()
 
-		key := fmt.Sprintf("barrier/%d/%d", pid, i)
+		key := fmt.Sprintf("very long barrier blah blah blah blah blah blah blah blah blah blah barrier/%d/%d", pid, i)
 		if err := barrier(store, key, *benchmarkWorkers); err != nil {
 			return err
 		}
